@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  mongo:
+    image: mongo:6.0
+    container_name: mongo-db
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_DATABASE: dd_db
+    volumes:
+      - mongo-data:/data/db
+
+  backend:
+    build: ./backend
+    container_name: backend-app
+    restart: unless-stopped
+    depends_on:
+      - mongo
+    environment:
+      MONGO_URL: mongodb://mongo:27017/dd_db
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/usr/src/app
+      - /usr/src/app/node_modules
+
+  frontend:
+    build: ./frontend
+    container_name: frontend-app
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "8081:80"
+
+volumes:
+  mongo-data:
