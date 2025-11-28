@@ -1,0 +1,89 @@
+name: CI/CD - Build & Deploy
+
+# Trigger on pushes to main (adjust branch name if needed)
+on:
+  push:
+    branches:
+      - main
+
+env:
+  BACKEND_IMAGE: ${{ secrets.selvamecsoft }}/crud-dd-backend:latest
+  FRONTEND_IMAGE: ${{ secrets.selvamecsoft }}/crud-dd-frontend:latest
+  VM_DEPLOY_DIR: ${{ secrets.VM_DEPLOY_DIR }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      backend_tag: ${{ steps.push-backend.outputs.tags }}
+      frontend_tag: ${{ steps.push-frontend.outputs.tags }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.selvamecsoft }}
+          password: ${{ secrets. XXXX}}
+
+      # Build & push backend
+      - name: Build & push backend image
+        id: push-backend
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: backend/Dockerfile
+          push: true
+          tags: ${{ env.BACKEND_IMAGE }}
+
+      # Build & push frontend
+      - name: Build & push frontend image
+        id: push-frontend
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: frontend/Dockerfile
+          push: true
+          tags: ${{ env.FRONTEND_IMAGE }}
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for images to be available (short delay)
+        run: sleep 8
+
+      - name: Copy docker-compose and nginx config to remote VM
+        uses: appleboy/scp-action@v0.1.9
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VM_SSH_PORT }}
+          source: "docker-compose.yml,docker/nginx/nginx.conf"
+          target: ${{ env.VM_DEPLOY_DIR }}
+
+      - name: SSH and run deployment commands on VM
+        uses: appleboy/ssh-action@v0.1.7
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.VM_SSH_PORT }}
+          script: |
+            set -e
+            cd "${{ env.VM_DEPLOY_DIR }}"
+            # Optionally create .env with credentials if compose references them
+            docker-compose pull --ignore-pull-failures
+            docker-compose up -d --remove-orphans
+            # Optional: remove dangling images
+            docker image prune -f
+            # Show running containers for logs
+            docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"
